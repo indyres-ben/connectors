@@ -411,7 +411,7 @@ class MicrosoftAPISession:
                 absolute_url, headers=headers, json=payload
             ) as resp:
                 if absolute_url.endswith("/$batch"):  # response code of $batch lies
-                    await self._check_batch_items_for_errors(absolute_url, resp)
+                    await self._check_batch_items_for_errors(absolute_url, resp, payload)
                 yield resp
         except aiohttp.client_exceptions.ClientOSError:
             self._logger.warning(
@@ -423,7 +423,7 @@ class MicrosoftAPISession:
         except ClientPayloadError as e:
             await self._handle_client_payload_error(e, retry_count)
 
-    async def _check_batch_items_for_errors(self, url, batch_resp):
+    async def _check_batch_items_for_errors(self, url, batch_resp, payload=None):
         body = await batch_resp.json()
         responses = body.get("responses", [])
         for response in responses:
@@ -432,13 +432,16 @@ class MicrosoftAPISession:
                 self._logger.warning(f"Batch request item failed with: {response}")
                 headers = response.get("headers", {})
                 req_info = RequestInfo(url=url, method="POST", headers=headers)
-                raise ClientResponseError(
-                    request_info=req_info,
-                    headers=headers,
-                    status=status,
-                    message=response.get("body", {}).get("error", {}).get("message"),
-                    history=(batch_resp),
-                )
+                if status != 400:
+                    raise ClientResponseError(
+                        request_info=req_info,
+                        headers=headers,
+                        status=status,
+                        message=response.get("body", {}).get("error", {}).get("message"),
+                        history=(batch_resp),
+                    )
+                else:
+                    self._logger.warning(f"Ignoring 400 error : {response.get('body', {}).get('error', {}).get('message')}\nPayload: {payload}")
 
     @asynccontextmanager
     @retryable_aiohttp_call(retries=DEFAULT_RETRY_COUNT)
